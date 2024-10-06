@@ -2,7 +2,19 @@
 ================
 Tamir Spevak
 
-This Markdown file describes the data folder structure and organization:
+Instructions:
+
+1. download dataset from provided kaggle link
+2. open RStudio and ensure necessary libraries installed
+3. place the dataset file in a place of your choice
+4. copy the file path of the dataset
+5. replace the file path in the quotation marks with the copied file path like this:
+|cereal <- read_csv("../data/cereal.csv")|--->|cereal <- read_csv("copied file path")|
+6. run the code
+
+
+
+This section describes the data folder structure and organization:
 
 
 #name: name of each cereal
