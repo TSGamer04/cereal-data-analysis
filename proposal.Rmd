@@ -1,0 +1,432 @@
+---
+title: "Project proposal"
+author: "Tamir Spevak"
+output: pdf_document
+---
+
+```{r load-packages, echo=FALSE, message = FALSE}
+library(knitr)
+library(tidyverse)
+library(broom)
+library(htmltools)
+```
+
+```{r setup, include = FALSE}
+opts_chunk$set(echo=FALSE) # hide source code in the document
+```
+
+## 1. Introduction
+
+A healthy breakfast is one of the most important paramters that can improve your health, and a lot of people choose to have cereal as their breakfast. so which one is the healthiest? my analysis aims to find which cereal has the least "harmful" ingredients and the most "helpful" ones as well as show the connection between the amounts of different ingredients and their connection to the brand that makes them.
+
+# importance
+the breakfast in general and the cereal specifically are very important to a persons diet and finding the healthiness of each one can help me, if not more people improve their diet and health.
+
+# difficulty and uniqueness
+there are complex interactions in play and its very difficult to find a wide industry-spanning connections between 2 or more ingredients without an in-depth analysis. as a private person it is also easier for me to analyse the impact of a corporation on the values of its products without being influenced by them or being biased towards one of them.
+
+# approach 
+using regression analysis and its corresponding tests i aim to discover the ties between an ingredient and either another ingredient or a brand. i will also try to incorporate data about the levels at which a certain amount of a certain ingredient is considered healthy to not only find which one is the healthiest but also which brand is statistically the healthiest.
+
+## 2. Data
+
+```{r, echo = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+library(tidyverse)
+library(readr)
+library(ggplot2)
+library(dplyr)
+library(corrplot)
+
+cereal <- read_csv("../data/cereal.csv")
+
+print(head(cereal))
+```
+## 3. Preliminary results
+
+
+```{r echo = FALSE}
+#lets convert weight from ounces to grams, 100 grams is 3.5274 ounces so we normalize all values to a serving of that size.
+
+#calories,protein,fat,sodium,fiber,carbo,sugars,potass
+
+standard<-3.5274
+cereal$norm_factor<-standard/cereal$weight
+cereal$calories<-cereal$calories*cereal$norm_factor
+cereal$protein<-cereal$protein*cereal$norm_factor
+cereal$fat<-cereal$fat*cereal$norm_factor
+cereal$sodium<-cereal$sodium*cereal$norm_factor
+cereal$fiber<-cereal$fiber*cereal$norm_factor
+cereal$carbo<-cereal$carbo*cereal$norm_factor
+cereal$sugars<-cereal$sugars*cereal$norm_factor
+cereal$potass<-cereal$potass*cereal$norm_factor
+cereal$weight<-cereal$weight*cereal$norm_factor
+
+#lets choose only numerical values
+
+numericdata<-cereal%>%
+  select_if(is.numeric)
+numericdata <- subset(numericdata, select = -norm_factor)
+numericdata <- subset(numericdata, select = -weight)
+
+#compute a correlation matrix
+
+correlate_matrix<-cor(numericdata, use="complete.obs")
+
+#lets plot it
+
+corrplot(correlate_matrix, method = "number", type = "lower", 
+         tl.col = "black" ,bg="black")
+
+```
+in this graph we can see the simple correlation between every 2 ingredients, with 1 meaning direct correlation, -1 meaning reverse correlation (if there less of the first ingredient theres more of the second and vice versa) and 0 means theres seemingly no correlation.
+the clearest correlation is between fiber and potassium which is a scientifically known one especially with grain, which itself is an ingredient in most cereals.
+another very strong correlation is the reverse one between fibers and callories, another one that is well known as the increased time of digestion for food high in fibers means a smaller caloric intake.
+more examples include the reverse connection between sugars and carbs, potassium and calories, sugars and protein as well as some positive correlation between fat and calories, fiber and protein and protein and potassium.
+on the other hand, we see that except the correlation between fiber and potassium, most of them arent that strong and are around the value of 0.5 which means there is still quite a difference between the ingredients of each one and that the ingredient levels of the different cereals are diverse.
+
+```{r echo = FALSE}
+#lets sort the data by brands
+
+cereal <- cereal %>%
+  mutate(mfr = case_when(
+    mfr == "A" ~ "American Home Food Products",
+    mfr == "G" ~ "General Mills",
+    mfr == "K" ~ "Kellogg",
+    mfr == "N" ~ "Nabisco",
+    mfr == "P" ~ "Post",
+    mfr == "Q" ~ "Quaker Oats",
+    mfr == "R" ~ "Ralston Purina",
+    TRUE ~ mfr  # Keeps original values if they don't match any case
+  ))
+
+brand_summary <- cereal %>%
+    group_by(mfr) %>%
+    summarise(across(c(calories,protein,fat,sodium,fiber,carbo,sugars,potass), mean, na.rm = TRUE))
+
+#view the summarized data
+
+ggplot(cereal, aes(x = mfr, y = calories, fill = mfr)) +
+    geom_boxplot() +
+    labs(title = "Calories Distribution by Brand", y = "Calories Value") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 12))
+
+```
+this graph shows the difference between the average calories of all brands as well as the standard deviation.
+we can see for example that nabisco has lower calories while quaker and purina have relatively high calorie levels.
+
+```{r echo = FALSE}
+
+# lets find global average 
+nutrients <- c("calories","protein","fat","sodium","fiber","carbo","sugars","potass")
+overall_avg <- cereal %>%
+  summarise(across(all_of(nutrients), mean, na.rm = TRUE))
+
+# calculate brand-specific averages for each nutrient
+brand_avg <- cereal %>%
+  group_by(mfr) %>%
+  summarise(across(all_of(nutrients), mean, na.rm = TRUE))
+
+# calculate relative difference between each brand's nutrient values and the overall average
+relative_diff <- brand_avg %>%
+  rowwise() %>%
+  mutate(across(all_of(nutrients), 
+                ~ ((. - overall_avg[[cur_column()]]) / overall_avg[[cur_column()]]) * 100, 
+                .names = "rel_diff_{col}"))
+
+relative_diff <- relative_diff %>%
+  select(mfr, starts_with("rel_diff"))
+
+relative_diff_long <- relative_diff %>%
+  pivot_longer(cols = starts_with("rel_diff"), 
+               names_to = "Nutrient", 
+               values_to = "Relative_Difference") %>%
+  mutate(Nutrient = gsub("rel_diff_", "", Nutrient))
+
+ggplot(relative_diff_long,aes(x = Nutrient, y = mfr, fill = Relative_Difference))+geom_tile()+scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0,
+                       limits = c(-120, 120), name = "Relative Difference (%)")+theme_minimal() +
+  labs(title = "Relative Nutrient Differences by Brand",
+       x = "Nutrient",
+       y = "Brand") +
+  theme(axis.text.x = element_text(angle=45,hjust=1))
+
+
+```
+every place in the graph shows the difference between a certain brands avg use of certain ingredient and the overall average of that ingredient. we can again see nabiscos relative lack of calories and their high fiber contents. you can also see high fat in quaker oats cereals and low sugars and sodium in nabisco cereals.
+
+## 4. Data analysis plan
+
+As for our elements. i can decide to use any of the nutritional values as both outcome and predictor variables in a single regression or even choose a single outcome variable (e.g calories) and use all others as predictors in a multiple regression.
+as i predict now, i will probably choose the second after testing both as it provides a deeper analysis instead of one thats specific to only 2 variables. it will also allow me to find through methods like the latin square method to eliminate variables that interfere with results.
+
+the results from these correlations will help answer the question of how the brands influence their products and also help connect every ingredient with the other ones as well as its healthiness.
+
+```{r echo = FALSE}
+calories_model <- lm(calories ~ fiber + sugars + fat, data = cereal)
+summary(calories_model)
+
+# Create a multiple linear regression model
+calories_model <- lm(calories ~ fiber + sugars + fat, data = cereal)
+
+# Generate predictions for the fitted model
+cereal$predicted_calories <- predict(calories_model)
+
+# Melt the dataset to long format for ggplot
+cereal_long <- melt(cereal, id.vars = "calories", measure.vars = c("fiber", "sugars", "fat"))
+
+# Scatter plot with regression lines
+ggplot(cereal_long, aes(x = value, y = calories, color = variable)) +
+  geom_point(alpha = 0.5) +  # Scatter points
+  geom_smooth(method = "lm", se = FALSE) +  # Regression lines
+  labs(title = "Calories vs. Fiber, Sugars, and Fat",
+       x = "Predictors (Fiber, Sugars, Fat)",
+       y = "Calories") +
+  facet_wrap(~ variable, scales = "free") +  # Create a separate plot for each variable
+  theme_minimal() +
+  theme(legend.position = "none")  # Hide the legend for better clarity
+
+
+
+model <- lm(health ~ sugars + sodium + protein, data = cereal)
+# Display the summary of the regression model
+summary(model)
+# Add predicted values from the model
+cereal$predicted_health <- predict(model)
+
+# Create a scatter plot of predicted vs. actual health values
+ggplot(cereal, aes(x = predicted_health, y = health)) +
+  geom_point(color = "blue") +  # Scatter plot points
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +  # Ideal line
+  labs(title = "Predicted vs Actual Health Values",
+       x = "Predicted Health",
+       y = "Actual Health") +
+  theme_minimal()
+
+```
+
+
+```{r echo = FALSE}
+# Healthy ranges and limits for each nutrient
+healthy_ranges <- data.frame(
+  nutrient = c("calories","protein","fat","sodium","fiber","carbo","sugars","potass","vitamins"),
+  lower_bound = c(200,6,NA,NA,6,NA,NA,300,25),   # Lower bounds for sugar, fiber, and fat
+  upper_bound = c(400,NA,6,400,10,50,12,NA,NA), # Upper bound for sugar and fiber, but fat has no upper limit
+  type = c("range", "range", "lower")  # 'range' means two-ended range; 'lower' means a one-ended limit
+)
+
+# Function to calculate deviation for each nutrient with both ranges and one-ended limits
+calculate_deviation <- function(value, lower, upper, type) {
+  if (type == "range") {
+    # Two-ended range
+    if (!is.na(lower) && value < lower) {
+      return((lower - value) / lower)
+    } else if (!is.na(upper) && value > upper) {
+      return((value - upper) / upper)
+    } else {
+      return(0)  # Within the healthy range
+    }
+  } else if (type == "lower") {
+    # One-ended range with a lower limit
+    if (!is.na(lower) && value < lower) {
+      return((lower - value) / lower)
+    } else {
+      return(0)  # Healthy if above or equal to the lower limit
+    }
+  } else if (type == "upper") {
+    # One-ended range with an upper limit
+    if (!is.na(upper) && value > upper) {
+      return((value - upper) / upper)
+    } else {
+      return(0)  # Healthy if below or equal to the upper limit
+    }
+  }
+}
+
+# Apply the deviation calculation for each nutrient and add a health score
+cereal$health <- apply(cereal, 1, function(row) {
+  # Initialize total deviation
+  total_deviation <- 0
+  
+  # Loop over each nutrient to calculate deviation
+  for (i in 1:nrow(healthy_ranges)) {
+    nutrient <- healthy_ranges$nutrient[i]
+    lower <- healthy_ranges$lower_bound[i]
+    upper <- healthy_ranges$upper_bound[i]
+    type <- healthy_ranges$type[i]
+    
+    # Calculate deviation for the current nutrient
+    deviation <- calculate_deviation(as.numeric(row[nutrient]), lower, upper, type)
+    
+    # Sum deviations
+    total_deviation <- total_deviation + deviation
+  }
+  
+  # Calculate the health score (1 - average deviation)
+  health_score <- 1 - (total_deviation / nrow(healthy_ranges))
+  return(health_score)
+})
+
+# View the resulting data frame with health score
+print(cereal)
+
+# Assuming cereal is your data frame
+highest_score <- cereal[which.max(cereal$health), ]
+lowest_score <- cereal[which.min(cereal$health), ]
+average_score <- mean(cereal$health)
+median_score <- median(cereal$health)
+count_below_threshold <- sum(cereal$health < 0.5)  # Example threshold
+count_above_threshold <- sum(cereal$health >= 0.5)  # Example threshold
+std_dev_score <- sd(cereal$health)
+
+# Example output
+cat("The highest health score is:", highest_score$name, "with a score of", highest_score$health, "\n")
+cat("The lowest health score is:", lowest_score$name, "with a score of", lowest_score$health, "\n")
+cat("The average health score is:", average_score, "\n")
+cat("The median health score is:", median_score, "\n")
+cat("Count of cereals below threshold (0.5):", count_below_threshold, "\n")
+cat("Count of cereals above threshold (0.5):", count_above_threshold, "\n")
+cat("Standard deviation of health scores is:", std_dev_score, "\n")
+
+ingredients <- cereal[, nutrients]  # Adjust for your dataset
+correlations <- cor(ingredients, cereal$health)
+
+# Print the correlations
+print(correlations)
+```
+
+```{r echo = FALSE}
+library(ggplot2)
+
+# Create a data frame for the nutrients and their regression coefficients
+coefficients <- data.frame(
+  nutrient = c("calories", "protein", "fat", "sodium", "fiber", "carbo", "sugars", "potass"),
+  coefficient = c(-0.1947, 0.5296, 0.0050, -0.3049, 0.2011, 0.2171, -0.6388, 0.2390)
+)
+
+# Plot the bar plot
+ggplot(coefficients, aes(x = nutrient, y = coefficient, fill = coefficient > 0)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c("red", "green")) +  # Negative = red, positive = green
+  labs(title = "Impact of Nutrients on Health Score", y = "Regression Coefficient", x = "Nutrient") +
+  theme_minimal()
+
+# To plot multiple graphs in one window
+
+# Scatter plots for each nutrient
+plot(cereal$sugars, cereal$health, main = "sugars vs Health", xlab = "Sugars", ylab = "Health Score")
+abline(lm(health ~ sugars, data = cereal), col = "red")
+
+plot(cereal$protein, cereal$health, main = "Protein vs Health", xlab = "Protein", ylab = "Health Score")
+abline(lm(health ~ protein, data = cereal), col = "blue")
+
+model_sugars <- lm(health ~ sugars, data = cereal)
+
+# Get the summary
+summary(model_sugars)
+plot(model_sugars$fitted.values, model_sugars$residuals,
+     main = "Residuals vs Fitted",
+     xlab = "Fitted values (Predicted Health Score)",
+     ylab = "Residuals")
+abline(h = 0, col = "red")
+library(lmtest)
+dwtest(model_sugars)
+
+model_protein <- lm(health ~ protein, data = cereal)
+
+# Get the summary
+summary(model_protein)
+plot(model_protein$fitted.values, model_protein$residuals,
+     main = "Residuals vs Fitted",
+     xlab = "Fitted values (Predicted Health Score)",
+     ylab = "Residuals")
+abline(h = 0, col = "red")
+library(lmtest)
+dwtest(model_protein)
+```
+
+```{r echo = FALSE}
+avg_health <- aggregate(health ~ mfr, data = cereal, FUN = mean)
+
+# Sort manufacturers by average health
+avg_health_sorted <- avg_health[order(avg_health$health, decreasing = TRUE), ]
+
+# View sorted manufacturers by average health
+print(avg_health_sorted)
+# Calculate the overall average health score across all cereals
+overall_avg_health <- mean(cereal$health)
+
+# Add a new column indicating whether each cereal is above or below the overall average health
+cereal$above_avg <- ifelse(cereal$health > overall_avg_health, "Above", "Below")
+
+# Count how many cereals each manufacturer has above and below average
+above_below_count <- table(cereal$mfr, cereal$above_avg)
+
+# Convert the table to a data frame
+above_below_df <- as.data.frame(above_below_count)
+
+# Rename columns appropriately for clarity
+colnames(above_below_df) <- c("mfr", "Above_Below", "Count")
+
+# Reshape the data to have one row per manufacturer with separate columns for Above and Below counts
+library(reshape2)
+above_below_pivot <- dcast(above_below_df, mfr ~ Above_Below, value.var = "Count")
+
+# View the reshaped data with counts of Above and Below cereals for each manufacturer
+print(above_below_pivot)
+
+
+# Visualization for Method 1: Average Health by Manufacturer
+library(ggplot2)
+ggplot(avg_health_sorted, aes(x = reorder(mfr, -health), y = health)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  labs(title = "Average Health by Manufacturer", x = "Manufacturer", y = "Average Health Score") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+# Visualization for Method 2: Above/Below Average Cereals by Manufacturer
+ggplot(above_below_pivot, aes(x = mfr)) +
+  geom_bar(aes(y = Above, fill = "Above"), stat = "identity", position = "dodge") +
+  geom_bar(aes(y = Below, fill = "Below"), stat = "identity", position = "dodge") +
+  labs(title = "Number of Above/Below Average Health Cereals by Manufacturer", 
+       x = "Manufacturer", y = "Number of Cereals") +
+  scale_fill_manual(values = c("Above" = "green", "Below" = "red")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+above_below_pivot$total_cereals <- rowSums(above_below_pivot[, c("Above", "Below")])
+
+# Calculate percentage of cereals above average
+above_below_pivot$percent_above <- (above_below_pivot$Above / above_below_pivot$total_cereals) * 100
+
+# Sort manufacturers by percentage of cereals above average
+percent_above_sorted <- above_below_pivot[order(above_below_pivot$percent_above, decreasing = TRUE), ]
+
+# Print the sorted percentages
+print(percent_above_sorted)
+
+# Visualization: Bar plot of percentage of cereals above average by manufacturer
+ggplot(percent_above_sorted, aes(x = reorder(mfr, -percent_above), y = percent_above)) +
+  geom_bar(stat = "identity", fill = "purple") +
+  labs(title = "Percentage of Cereals Above Average Health by Manufacturer", 
+       x = "Manufacturer", y = "Percentage of Cereals Above Average (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+## Appendix
+
+### Data README
+
+```{r include_data_readme, comment=''}
+cat(readLines('../data/README.md'), sep = '\n')
+```
+
+### Source code
+
+```{r, ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
+
+```
